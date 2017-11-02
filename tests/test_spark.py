@@ -32,6 +32,7 @@ def setup_module(module):
         utils.require_hdfs()
     utils.require_spark()
     utils.upload_file(os.environ["SCALA_TEST_JAR_PATH"])
+    shakedown.run_dcos_command('package install --cli dcos-enterprise-cli --yes')
 
 
 def teardown_module(module):
@@ -299,11 +300,12 @@ def test_marathon_group():
 
 
 @pytest.mark.sanity
+@pytest.mark.secrets
 def test_secrets():
     properties_file_path = os.path.join(THIS_DIR, "resources", "secrets-opts.txt")
-    secrets_handler = utils.SecretHandler(SECRET_NAME, SECRET_CONTENTS)
-    r = secrets_handler.create_secret()
-    assert r.ok, "Error creating secret, {}".format(r.content)
+    # Create secret
+    shakedown.run_dcos_command('security secrets create /{} --value {}'.format(SECRET_NAME, SECRET_CONTENTS))
+
     secret_file_name = "secret_file"
     output = "Contents of file {}: {}".format(secret_file_name, SECRET_CONTENTS)
     args = ["--properties-file", properties_file_path,
@@ -313,9 +315,9 @@ def test_secrets():
                     expected_output=output,
                     app_name="/spark",
                     args=args)
-    r = secrets_handler.delete_secret()
-    if not r.ok:
-        LOGGER.warn("Error when deleting secret, {}".format(r.content))
+
+    # Delete secret
+    shakedown.run_dcos_command('security secrets delete /{}'.format(SECRET_NAME))
 
 
 @pytest.mark.sanity
@@ -339,7 +341,6 @@ def test_driver_executor_tls():
     Put keystore and truststore as secrets in DC/OS secret store.
     Run SparkPi job with TLS enabled, referencing those secrets.
     '''
-    shakedown.run_dcos_command('package install --cli dcos-enterprise-cli --yes')
     resources_folder = os.path.join(
         os.path.dirname(os.path.realpath(__file__)), 'resources'
     )
@@ -374,6 +375,8 @@ def test_driver_executor_tls():
                           "--conf", "spark.mesos.executor.secret.filenames={},{}".format(keystore_file, truststore_file),
                           "--conf", "spark.mesos.task.labels=DCOS_SPACE:/spark"
                           ])
+    shakedown.run_dcos_command('security secrets delete /{}'.format(keystore_secret))
+    shakedown.run_dcos_command('security secrets delete /{}'.format(truststore_secret))
 
 
 def _run_janitor(service_name):
